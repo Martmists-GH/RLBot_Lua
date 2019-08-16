@@ -43,7 +43,7 @@ lua_State* createAgent(int index){
     lua_getglobal(L, "_G");
 
     // Register `class` and `super`
-    run_file(L, (char*)"classes.lua", 2);
+    run_file(L, (char*)"classes.lua", 3);
     lua_setfield(L, 1, "dump");
     lua_setfield(L, 1, "super");
     lua_setfield(L, 1, "class");
@@ -53,12 +53,13 @@ lua_State* createAgent(int index){
 
     // Load bot onto the stack
     // THIS FILE MUST RETURN AN INSTANCE OR IT WONT WORK!
-    run_file(L, (char*)"bot.lua", 1);
+    run_file(L, (char*)"example_bot.lua", 1);
 
     // Call bot_init
-    lua_pushstring(L, "bot_init");
+    lua_getfield(L, -1, "bot_init");
+    lua_insert(L, -2);
     lua_pushnumber(L, index+1);
-    lua_call(L, 1, 0);
+    lua_call(L, 2, 0);
 
     // Pop _G from the stack
     lua_pop(L, 1);
@@ -379,6 +380,8 @@ PyObject* runAgent(LuaAgent* agent, PyObject* packet) {
     // Stack: [Bot]
     // Create function name
     lua_pushstring(L, "get_output");
+    // add Bot as argument
+    lua_insert(L, -2);
 
     // Parse and prepare packet
     createLuaPacket(L, packet);
