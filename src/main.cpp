@@ -53,7 +53,7 @@ lua_State* createAgent(int index){
 
     // Load bot onto the stack
     // THIS FILE MUST RETURN AN INSTANCE OR IT WONT WORK!
-    run_file(L, (char*)"example_bot.lua", 1);
+    run_file(L, (char*)"bot.lua", 1);
 
     // Call bot_init
     lua_getfield(L, -1, "bot_init");
