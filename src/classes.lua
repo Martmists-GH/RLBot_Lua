@@ -1,7 +1,8 @@
-function dump(o, r, indent, n)
+function dump(o, r, indent, n, noprint)
     local r = r or false
     local indent = indent or 4
     local n = n or 0
+    local noprint = noprint or false
 
     local s = "{\n"
     for k, v in pairs(o) do
@@ -15,6 +16,9 @@ function dump(o, r, indent, n)
         s = s .. (" "):rep(indent*(1+n)) .. k .. ": " .. val .. ",\n"
     end
     s = s .. (" "):rep(indent*n) .. "}"
+    if n == 0 and not noprint then
+        print(s)
+    end
     return s
 end
 
@@ -59,12 +63,14 @@ local function create_class(_typedef)
 
     local _class_meta = {}
     setmetatable(_class, _class_meta)
-    _class_meta.__call = create_instance(_class)
+    _class_meta.__call = function(...) return create_instance(_class)(...) end
     _class_meta.__tostring = function() return ("<class %q>"):format(_typedef.__name) end
 
     return function(_, tab)
         _class.__identity = tab
         _G[_class.__name] = _class
+        _class_meta.__newindex = function(_, key, val) _class.__identity[key] = val end
+        _class_meta.__index = function(_, key) return _class.__identity[key] end
         return _class
     end
 end

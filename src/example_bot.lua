@@ -1,6 +1,6 @@
-function get_car_facing_vector(car)
-    local pitch = float(car.rotation.pitch)
-    local yaw = float(car.rotation.yaw)
+function GameCar.get_facing_vector(self)
+    local pitch = self.rotation.pitch
+    local yaw = self.rotation.yaw
 
     local facing_x = math.cos(pitch) * math.cos(yaw)
     local facing_y = math.cos(pitch) * math.sin(yaw)
@@ -8,13 +8,13 @@ function get_car_facing_vector(car)
     return Vector(facing_x, facing_y)
 end
 
-function Vector:correction_to(self, ideal)
+function Vector.correction_to(self, ideal)
     local current_rad = math.atan2(self.y, -self.x)
     local ideal_rad = math.atan2(ideal.y, -ideal.x)
 
     local correction = ideal_rad - current_rad
 
-    if abs(correction) > math.pi then
+    if math.abs(correction) > math.pi then
         if correction > 0 then
             correction = correction - 2*math.pi
         else
@@ -37,9 +37,11 @@ class "MyBot" : extends "LuaBot" {
         local car_location = my_car.location
 
         local car_to_ball = ball_location - car_location
-        local car_direction = get_car_facing_vector(my_car)
-
+        
+        local car_direction = my_car:get_facing_vector()
+        
         local steer_correction_rad = car_direction:correction_to(car_to_ball)
+        
         if steer_correction_rad > 0 then
             turn = -1
         else
@@ -52,5 +54,6 @@ class "MyBot" : extends "LuaBot" {
         return self.controller_state
     end
 }
+
 
 return MyBot()

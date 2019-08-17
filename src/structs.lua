@@ -5,9 +5,9 @@ class "Vector" {
 
     __ctr = function(self, x, y, z)
         if type(x) == "table" then
-            x = x.x or x[1]
             y = x.y or x[2]
             z = x.z or x[3]
+            x = x.x or x[1]
         end
         self.x = x or 0
         self.y = y or 0

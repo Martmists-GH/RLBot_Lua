@@ -13,6 +13,46 @@ extern "C" {
 
 #include <iostream>
 
+static void stackDump (lua_State *L, bool verbose=false) {
+    int i;
+    int top = lua_gettop(L);
+    for (i = 1; i <= top; i++) {  /* repeat for each level */
+        int t = lua_type(L, i);
+        switch (t) {
+
+            case LUA_TSTRING:  /* strings */
+                printf("`%s'", lua_tostring(L, i));
+                break;
+
+            case LUA_TBOOLEAN:  /* booleans */
+                printf(lua_toboolean(L, i) ? "true" : "false");
+                break;
+
+            case LUA_TNUMBER:  /* numbers */
+                printf("%g", lua_tonumber(L, i));
+                break;
+
+            case LUA_TTABLE:
+                if (verbose) {
+                    lua_getglobal(L, "dump");
+                    lua_pushvalue(L, i);
+                    lua_call(L, 1, 0);
+                } else {
+                    printf("%s", lua_typename(L, t));
+                }
+
+                break;
+
+            default:  /* other values */
+                printf("%s", lua_typename(L, t));
+                break;
+
+        }
+        printf("  ");  /* put a separator */
+    }
+    printf("\n");  /* end the listing */
+}
+
 int PyModule_AddType(PyObject *module, const char *name, PyTypeObject *type) {
     if (PyType_Ready(type)) {
         return -1;
@@ -47,13 +87,14 @@ lua_State* createAgent(int index){
     lua_setfield(L, 1, "dump");
     lua_setfield(L, 1, "super");
     lua_setfield(L, 1, "class");
+    lua_settop(L, 0);
 
     // Register structs
     run_file(L, (char*)"structs.lua", 0);
-
     // Load bot onto the stack
     // THIS FILE MUST RETURN AN INSTANCE OR IT WONT WORK!
     run_file(L, (char*)"bot.lua", 1);
+    lua_pushvalue(L, -1);
 
     // Call bot_init
     lua_getfield(L, -1, "bot_init");
@@ -62,8 +103,6 @@ lua_State* createAgent(int index){
     lua_call(L, 2, 0);
 
     // Pop _G from the stack
-    lua_pop(L, 1);
-
     return L;
 }
 
@@ -93,7 +132,7 @@ void getBool(lua_State* L, PyObject* parent, char* name){
 
 void getString(lua_State* L, PyObject* parent, char* name){
     PyObject* prop = PyObject_GetAttrString(parent, name);
-    char* x = PyBytes_AsString(prop);
+    const char* x = PyUnicode_AsUTF8(prop);
     Py_DECREF(prop);
     lua_pushstring(L, x);
     lua_setfield(L, -2, name);
@@ -121,25 +160,25 @@ void getRotation(lua_State* L, PyObject* parent, char* name){
 
 void createLuaPacket(lua_State *L, PyObject* packet){
     // Get _G for the classes
-    // stack: [Bot, "get_output"]
+    // stack: [Bot, <function get_output>, Bot]
     lua_getglobal(L, "_G");
-    // stack: [Bot, "get_output", _G]
-    lua_pushstring(L, "GameTickPacket");
-    // stack: [Bot, "get_output", _G, 'GameTickPacket']
+    // stack: [Bot, <function get_output>, Bot, _G]
+    lua_getfield(L, -1, "GameTickPacket");
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>]
     lua_newtable(L);
 
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}]
     PyObject* num_cars = PyObject_GetAttrString(packet, "num_cars");
     long num_cars_i = PyLong_AsLong(num_cars);
     lua_pushinteger(L, num_cars_i);
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {int num_cars}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {int num_cars}]
     lua_setfield(L, -2, "num_cars");
     Py_DECREF(num_cars);
 
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}]
     PyObject* cars = PyObject_GetAttrString(packet, "game_cars");
     lua_newtable(L);
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table game_cars}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table game_cars}]
     for (long i = 0; i < num_cars_i; i++){
         // Create car
         PyObject* index = PyLong_FromLong(i);
@@ -148,24 +187,24 @@ void createLuaPacket(lua_State *L, PyObject* packet){
         lua_newtable(L);
 
         // Physics
-        // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table game_cars}, {table car_n}]
+        // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table game_cars}, {table car_n}]
         PyObject* physics = PyObject_GetAttrString(car, "physics");
         lua_newtable(L);
-        // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table game_cars}, {table car_n}, {table car_n_physics}]
+        // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table game_cars}, {table car_n}, {table car_n_physics}]
         char* physics_keys[] = {(char*)"location", (char*)"velocity", (char*)"angular_velocity", (char*)"rotation"};
 
         for (char* physics_key : physics_keys) {
-            if (strcmp(physics_key, "rotation") != 0){
+            if (strcmp(physics_key, "rotation") == 0){
                 getRotation(L, physics, physics_key);
             } else {
                 getVector(L, physics, physics_key);
             }
         }
-        // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table game_cars}, {table car_n}, {table car_n_physics}]
+        // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table game_cars}, {table car_n}, {table car_n_physics}]
         lua_setfield(L, -2, "physics");
         Py_DECREF(physics);
 
-        // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table game_cars}, {table car_n}]
+        // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table game_cars}, {table car_n}]
         char* bool_keys[] = {
                 (char*)"is_demolished",
                 (char*)"has_wheel_contact",
@@ -178,84 +217,84 @@ void createLuaPacket(lua_State *L, PyObject* packet){
             getBool(L, car, key);
         }
 
-        // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table game_cars}, {table car_n}]
+        // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table game_cars}, {table car_n}]
         getString(L, car, (char*)"name");
         getInt(L, car, (char*)"team");
         getDouble(L, car, (char*)"boost");
 
         lua_newtable(L);
         PyObject* hitbox = PyObject_GetAttrString(car, "hitbox");
-        // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table game_cars}, {table car_n}, {table hitbox}]
+        // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table game_cars}, {table car_n}, {table hitbox}]
         getInt(L, hitbox, (char*)"length");
         getInt(L, hitbox, (char*)"width");
         getInt(L, hitbox, (char*)"height");
 
-        // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table game_cars}, {table car_n}, {table hitbox}]
+        // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table game_cars}, {table car_n}, {table hitbox}]
         lua_setfield(L, -2, "hitbox");
         Py_DECREF(hitbox);
 
-        // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table game_cars}, {table car_n}]
+        // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table game_cars}, {table car_n}]
         Py_DECREF(car);
         lua_rawseti(L, -2, i+1);
-        // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table game_cars}]
+        // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table game_cars}]
     }
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table game_cars}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table game_cars}]
     lua_setfield(L, -2, "game_cars");
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}]
 
     PyObject* num_boost = PyObject_GetAttrString(packet, "num_boost");
     long num_boost_i = PyLong_AsLong(num_boost);
     lua_pushinteger(L, num_boost_i);
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {int num_boost}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {int num_boost}]
     lua_setfield(L, -2, "num_boost");
     Py_DECREF(num_boost);
 
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}]
     lua_newtable(L);
     PyObject* boosts = PyObject_GetAttrString(packet, (char*)"game_boosts");
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table boosts}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table boosts}]
     for (long i = 0; i < num_boost_i; i++) {
         PyObject* index = PyLong_FromLong(i);
         PyObject* boost_obj = PyObject_GetItem(boosts, index);
         Py_DECREF(index);
         lua_newtable(L);
-        // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table boosts}, {table boost_<i>}]
+        // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table boosts}, {table boost_<i>}]
         getBool(L, boost_obj, (char*)"is_active");
         getDouble(L, boost_obj, (char*)"timer");
-        // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table boosts}, {table boost_<i>}]
+        // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table boosts}, {table boost_<i>}]
         lua_rawseti(L, -2, i+1);
-        // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table boosts}]
+        // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table boosts}]
         Py_DECREF(boost_obj);
     }
     Py_DECREF(boosts);
 
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table boosts}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table boosts}]
     lua_setfield(L, -2, "game_boosts");
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}]
 
     lua_newtable(L);
     PyObject* ball = PyObject_GetAttrString(packet, (char*)"game_ball");
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table ball}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table ball}]
     PyObject* physics = PyObject_GetAttrString(ball, "physics");
     lua_newtable(L);
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table ball}, {table physics}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table ball}, {table physics}]
     char* physics_keys[] = {(char*)"location", (char*)"velocity", (char*)"angular_velocity", (char*)"rotation"};
 
     for (char* physics_key : physics_keys) {
-        if (strcmp(physics_key, "rotation") != 0){
+        if (strcmp(physics_key, "rotation") == 0){
             getRotation(L, physics, physics_key);
         } else {
             getVector(L, physics, physics_key);
         }
     }
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table ball}, {table physics}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table ball}, {table physics}]
     lua_setfield(L, -2, "physics");
     Py_DECREF(physics);
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table ball}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table ball}]
 
     lua_newtable(L);
     PyObject* last_touch = PyObject_GetAttrString(ball, "latest_touch");
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table ball}, {table last_touch}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table ball}, {table last_touch}]
     getString(L, last_touch, (char*)"player_name");
     getDouble(L, last_touch, (char*)"time_seconds");
     getInt(L, last_touch, (char*)"team");
@@ -263,63 +302,63 @@ void createLuaPacket(lua_State *L, PyObject* packet){
     getVector(L, last_touch, (char*)"hit_location");
     getVector(L, last_touch, (char*)"hit_normal");
 
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table ball}, {table last_touch}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table ball}, {table last_touch}]
     Py_DECREF(last_touch);
     lua_setfield(L, -2, "latest_touch");
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table ball}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table ball}]
 
     lua_newtable(L);
     PyObject* dropshot_info = PyObject_GetAttrString(ball, "drop_shot_info");
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table ball}, {table dropshot}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table ball}, {table dropshot}]
     getInt(L, dropshot_info, (char*)"damage_index");
     getInt(L, dropshot_info, (char*)"absorbed_force");
     getInt(L, dropshot_info, (char*)"force_accum_recent");
     Py_DECREF(dropshot_info);
     lua_setfield(L, -2, "drop_shot_info");
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table ball}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table ball}]
 
     lua_newtable(L);
     PyObject* collision = PyObject_GetAttrString(ball, "collision_shape");
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table ball}, {table collision}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table ball}, {table collision}]
     getInt(L, collision, (char*)"type");
 
     lua_newtable(L);
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table ball}, {table collision}, {table box}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table ball}, {table collision}, {table box}]
     PyObject* box = PyObject_GetAttrString(collision, (char*)"box");
     getDouble(L, box, (char*)"length");
     getDouble(L, box, (char*)"width");
     getDouble(L, box, (char*)"height");
     Py_DECREF(box);
     lua_setfield(L, -2, "box");
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table ball}, {table collision}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table ball}, {table collision}]
 
     lua_newtable(L);
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table ball}, {table collision}, {table sphere}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table ball}, {table collision}, {table sphere}]
     PyObject* sphere = PyObject_GetAttrString(collision, (char*)"sphere");
     getDouble(L, sphere, (char*)"diameter");
     Py_DECREF(sphere);
     lua_setfield(L, -2, "sphere");
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table ball}, {table collision}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table ball}, {table collision}]
 
     lua_newtable(L);
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table ball}, {table collision}, {table cylinder}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table ball}, {table collision}, {table cylinder}]
     PyObject* cylinder = PyObject_GetAttrString(collision, (char*)"cylinder");
     getDouble(L, cylinder, (char*)"diameter");
     getDouble(L, cylinder, (char*)"height");
     Py_DECREF(cylinder);
     lua_setfield(L, -2, "cylinder");
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table ball}, {table collision}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table ball}, {table collision}]
     Py_DECREF(collision);
     lua_setfield(L, -2, "collision_shape");
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table ball}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table ball}]
 
     lua_setfield(L, -2, "game_ball");
     Py_DECREF(ball);
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}]
 
     lua_newtable(L);
     PyObject* game_info = PyObject_GetAttrString(packet, (char*)"game_info");
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table game_info}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table game_info}]
     getDouble(L, game_info, (char*)"seconds_elapsed");
     getDouble(L, game_info, (char*)"game_time_remaining");
     getDouble(L, game_info, (char*)"world_gravity_z");
@@ -332,46 +371,46 @@ void createLuaPacket(lua_State *L, PyObject* packet){
 
     Py_DECREF(game_info);
     lua_setfield(L, -2, "game_info");
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}]
 
     PyObject* num_teams = PyObject_GetAttrString(packet, "num_teams");
     long num_teams_i = PyLong_AsLong(num_cars);
     lua_pushinteger(L, num_teams_i);
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {int num_teams}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {int num_teams}]
     lua_setfield(L, -2, "num_teams");
     Py_DECREF(num_teams);
 
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}]
     lua_newtable(L);
     PyObject* teams = PyObject_GetAttrString(packet, "teams");
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table teams}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table teams}]
 
     for (long i = 0; i < num_teams_i; i++){
         PyObject* index = PyLong_FromLong(i);
         PyObject* team = PyObject_GetItem(teams, index);
         Py_DECREF(index);
         lua_newtable(L);
-        // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table teams}, {table team_n}]
+        // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table teams}, {table team_n}]
 
         getInt(L, team, (char*)"team_index");
         getInt(L, team, (char*)"score");
         lua_rawseti(L, -2, i+1);
-        // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table teams}]
+        // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table teams}]
         Py_DECREF(team);
     }
     Py_DECREF(teams);
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}, {table teams}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}, {table teams}]
     lua_setfield(L, -2, "teams");
-    // stack: [Bot, "get_output", _G, 'GameTickPacket', {table packet}]
+    // stack: [Bot, <function get_output>, Bot, <class GameTickPacket>, {table packet}]
 
     // Packet is now on top the stack
 
     lua_call(L, 1, 1);
-    // stack: [Bot, "get_output", _G, <class GameTickPacket>]
-
-    // Remove _G again
-    lua_pop(L, -2);
-    // stack: [Bot, "get_output", <class GameTickPacket>]
+    // stack: [Bot, <function get_output>, Bot, _G, <object GameTickPacket>]
+    // Remove _G again, we need to move it to the top first
+    lua_insert(L, -2);
+    lua_pop(L, 1);
+    // stack: [Bot, <function get_output>, Bot, <object GameTickPacket>]
 }
 
 PyObject* runAgent(LuaAgent* agent, PyObject* packet) {
@@ -379,44 +418,57 @@ PyObject* runAgent(LuaAgent* agent, PyObject* packet) {
 
     // Stack: [Bot]
     // Create function name
-    lua_pushstring(L, "get_output");
+    lua_pushvalue(L, -1);
+    lua_getfield(L, -1, "get_output");
     // add Bot as argument
     lua_insert(L, -2);
 
     // Parse and prepare packet
     createLuaPacket(L, packet);
-    // stack: [Bot, "get_output", <class GameTickPacket>]
+    // stack: [Bot, <function get_output>, Bot, <object GameTickPacket>]
 
     // Call function, puts controller state to the stack
-    lua_call(L, 1, 1);
-    // stack: [Bot, <class ControllerState>]
+    int res = lua_pcall(L, 2, 1, 0);
+    if (res != 0) {
+        PyErr_SetString(PyExc_RuntimeError, lua_tostring(L, -1));
+        lua_settop(L, 1);
+        return nullptr;
+    }
+    // stack: [Bot, <object ControllerState>]
 
     // Get properties from controller state
     lua_getfield(L, -1, "steer");
     double steer = lua_tonumber(L, -1);
+    lua_pop(L, 1);
     lua_getfield(L, -1, "throttle");
     double throttle = lua_tonumber(L, -1);
+    lua_pop(L, 1);
     lua_getfield(L, -1, "pitch");
     double pitch = lua_tonumber(L, -1);
+    lua_pop(L, 1);
     lua_getfield(L, -1, "yaw");
     double yaw = lua_tonumber(L, -1);
+    lua_pop(L, 1);
     lua_getfield(L, -1, "roll");
     double roll = lua_tonumber(L, -1);
+    lua_pop(L, 1);
     lua_getfield(L, -1, "jump");
     bool jump = lua_toboolean(L, -1);
+    lua_pop(L, 1);
     lua_getfield(L, -1, "boost");
     bool boost = lua_toboolean(L, -1);
+    lua_pop(L, 1);
     lua_getfield(L, -1, "handbrake");
     bool handbrake = lua_toboolean(L, -1);
+    lua_pop(L, 1);
     lua_getfield(L, -1, "use_item");
     bool use_item = lua_toboolean(L, -1);
+    lua_pop(L, 1);
 
-    PyObject* ret = Py_BuildValue("dddddbbbb", steer, throttle, pitch, yaw, roll, jump, boost, handbrake, use_item);
-
+    PyObject* ret = Py_BuildValue("dddddhhhh", steer, throttle, pitch, yaw, roll, jump, boost, handbrake, use_item);
     // Pop controller state
-    lua_pop(L, -1);
+    lua_pop(L, 1);
     // stack: [Bot]
-
     return ret;
 }
 
@@ -440,8 +492,8 @@ PyObject* Agent_GetOutput(PyObject *_self, PyObject *args, PyObject *kwargs){
     PyObject* packet = nullptr;
     char* kwlist[] = {(char*)"packet", nullptr};
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O:__init__", kwlist, &packet)) {
-        PyErr_SetString(PyExc_ValueError, "Unable to call GetOutput");
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O:get_output", kwlist, &packet)) {
+        PyErr_SetString(PyExc_TypeError, "Unable to call GetOutput");
         return nullptr;
     }
 
@@ -458,22 +510,50 @@ static void Agent_tp_dealloc(PyObject *self) {
 }
 
 PyMethodDef Agent_Methods[] = {
-        {"get_output", (PyCFunction) Agent_GetOutput, METH_VARARGS, "Returns a controller state from a GTP"},
+        {"get_output", (PyCFunction) Agent_GetOutput, METH_VARARGS | METH_KEYWORDS, "Returns a controller state from a GTP"},
         {nullptr}
 };
 
 static PyTypeObject PyType_LuaBot = {
-        PyVarObject_HEAD_INIT(nullptr, 0)
-        .tp_name = "rlbot_lua.LuaBot",
-        .tp_basicsize = sizeof(LuaAgent),
-        .tp_itemsize = 0,
-        .tp_dealloc = (destructor) Agent_tp_dealloc,
-        .tp_flags = Py_TPFLAGS_DEFAULT,
-        .tp_clear = (inquiry) Agent_tp_clear,
-        .tp_methods = Agent_Methods,
-        .tp_init = (initproc) Agent_tp_init,
-        .tp_alloc = PyType_GenericAlloc,
-        .tp_new = PyType_GenericNew
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "rlbot_lua.LuaBot",                                    /* tp_name */
+    sizeof(LuaAgent),                        /* tp_basicsize */
+    0,                                          /* tp_itemsize */
+    /* methods */
+    (destructor) Agent_tp_dealloc,                              /* tp_dealloc */
+    nullptr,                                          /* tp_vectorcall_offset */
+    nullptr,                                          /* tp_getattr */
+    nullptr,                                          /* tp_setattr */
+    nullptr,                                          /* tp_as_async */
+    nullptr,                                 /* tp_repr */
+    nullptr,                                          /* tp_as_number */
+    nullptr,                                          /* tp_as_sequence */
+    nullptr,                                          /* tp_as_mapping */
+    nullptr,                                          /* tp_hash */
+    nullptr,                                          /* tp_call */
+    nullptr,                                          /* tp_str */
+    nullptr,                             /* tp_getattro */
+    nullptr,                                          /* tp_setattro */
+    nullptr,                                          /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT,                    /* tp_flags */
+    nullptr,                                  /* tp_doc */
+    nullptr,                             /* tp_traverse */
+    (inquiry) Agent_tp_clear,                                          /* tp_clear */
+    nullptr,                                          /* tp_richcompare */
+    0,                                          /* tp_weaklistoffset */
+    nullptr,                                          /* tp_iter */
+    nullptr,                                          /* tp_iternext */
+    Agent_Methods,                                          /* tp_methods */
+    nullptr,                              /* tp_members */
+    nullptr,                                          /* tp_getset */
+    nullptr,                                          /* tp_base */
+    nullptr,                                          /* tp_dict */
+    nullptr,                            /* tp_descr_get */
+    nullptr,                                          /* tp_descr_set */
+    0,                                          /* tp_dictoffset */
+    (initproc) Agent_tp_init,                                 /* tp_init */
+    PyType_GenericAlloc,                        /* tp_alloc */
+    PyType_GenericNew,                          /* tp_new */
 };
 
 PyObject* RLBot_Lua__module = nullptr;

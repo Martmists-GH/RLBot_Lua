@@ -4,3 +4,8 @@ dist/
 .idea/
 *.py[cod]
 *.so
+CMakeCache.txt
+CMakeFiles/
+Makefile
+*.cbp
+*.cmake
