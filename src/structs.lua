@@ -185,6 +185,36 @@ class "BallPrediction" {
     end
 }
 
+class "Goal" {
+    __ctr = function(self, goal)
+        self.team = goal.team_num
+        self.location = Vector(goal.location)
+        self.direction = Vector(goal.direction)
+    end
+}
+
+class "BoostPad" {
+    __ctr = function(self, pad)
+        self.location = Vector(pad.location)
+        self.full_boost = pad.is_full_boost
+    end
+}
+
+class "FieldInfo" {
+    __ctr = function(self, packet)
+        self.num_boosts = packet.num_boosts
+        self.num_goals = packet.num_goals
+        self.boost_pads = {}
+        self.goals = {}
+        for i, pad in packet.boost_pads do
+            self.boost_pads[i] = BoostPad(pad)
+        end
+        for i, goal in packet.goals do
+            self.goals[i] = Goal(goal)
+        end
+    end
+}
+
 class "ControllerState" {
     __ctr = function(self, throttle, steer, pitch, yaw, roll, jump, boost, handbrake, use_item)
         self.throttle = throttle or 0

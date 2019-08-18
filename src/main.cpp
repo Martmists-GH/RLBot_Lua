@@ -186,6 +186,80 @@ static int getBallPrediction(lua_State *L){
     return 1;
 }
 
+static int getFieldInfo(lua_State *L){
+    // TODO: Finish this
+    // Maybe figure out how to properly interface with the DLLs and build against them without the .lib?
+
+    // Stack: [..., Bot]
+    lua_getfield(L, -1, "___agentptr");
+    // Stack: [..., Bot, <agent>]
+    auto agent = (LuaAgent*)lua_touserdata(L, -1);
+    lua_pop(L, 1);
+    // Stack: [..., Bot]
+    PyObject* field_info = PyObject_CallMethod(agent->bot, "get_field_info", nullptr);
+    lua_newtable(L);
+    // Stack: [..., Bot, {table field_info}]
+
+    PyObject* num_goals = PyObject_GetAttrString(field_info, "num_goals");
+    long num_goals_i = PyLong_AsLong(num_goals);
+    lua_pushinteger(L, num_goals_i);
+    // Stack: [..., Bot, {table field_info}, num_goals]
+    lua_setfield(L, -2, "num_goals");
+    Py_DECREF(num_goals);
+    // Stack: [..., Bot, {table field_info}]
+
+    PyObject* goals = PyObject_GetAttrString(field_info, "goals");
+    lua_newtable(L);
+    for (long i = 0; i < num_goals_i; i++){
+        PyObject* index = PyLong_FromLong(i);
+        PyObject* goal = PyObject_GetItem(goals, index);
+        Py_DECREF(index);
+        lua_newtable(L);
+
+        getInt(L, goal, (char*)"team_num");
+        getVector(L, goal, (char*)"location");
+        getVector(L, goal, (char*)"direction");
+
+        Py_DECREF(goal);
+        lua_rawseti(L, -2, i+1);
+    }
+    lua_setfield(L, -2, "goals");
+    Py_DECREF(goals);
+
+
+    PyObject* num_boosts = PyObject_GetAttrString(field_info, "num_boosts");
+    long num_boosts_i = PyLong_AsLong(num_boosts);
+    lua_pushinteger(L, num_boosts_i);
+    // Stack: [..., Bot, {table field_info}, num_boosts]
+    lua_setfield(L, -2, "num_boosts");
+    Py_DECREF(num_boosts);
+    // Stack: [..., Bot, {table field_info}]
+
+    PyObject* boosts = PyObject_GetAttrString(field_info, "boost_pads");
+    lua_newtable(L);
+    for (long i = 0; i < num_boosts_i; i++){
+        PyObject* index = PyLong_FromLong(i);
+        PyObject* boost = PyObject_GetItem(boosts, index);
+        Py_DECREF(index);
+        lua_newtable(L);
+
+        getBool(L, boost, (char*)"is_full_boost");
+        getVector(L, boost, (char*)"location");
+
+        Py_DECREF(boost);
+        lua_rawseti(L, -2, i+1);
+    }
+    lua_setfield(L, -2, "boost_pads");
+    Py_DECREF(boosts);
+    Py_DECREF(field_info);
+
+    lua_getglobal(L, "FieldInfo");
+    lua_insert(L, -2);
+    lua_call(L, 1, 1);
+
+    return 1;
+}
+
 lua_State* createAgent(LuaAgent* agent, int index){
     lua_State *L = luaL_newstate();
     luaL_openlibs(L);
@@ -211,6 +285,8 @@ lua_State* createAgent(LuaAgent* agent, int index){
 
     lua_pushcfunction(L, getBallPrediction);
     lua_setfield(L, -2, "get_ball_prediction");
+    lua_pushcfunction(L, getFieldInfo);
+    lua_setfield(L, -2, "get_field_info");
     // Add methods
 
     // Call bot_init
