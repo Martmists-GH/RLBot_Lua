@@ -168,6 +168,23 @@ class "GameTickPacket" {
     end
 }
 
+class "BallPredictionSlice" : extends "GameObject" {
+    __ctr = function(self, slice)
+        super(self):__ctr(slice)
+        self.game_seconds = slice.game_seconds
+    end
+}
+
+class "BallPrediction" {
+    __ctr = function(self, prediction)
+        self.num_slices = prediction.num_slices
+        self.slices = {}
+        for i, slice in ipairs(prediction.slices) do
+            self.slices[i] = BallPredictionSlice(slice)
+        end
+    end
+}
+
 class "ControllerState" {
     __ctr = function(self, throttle, steer, pitch, yaw, roll, jump, boost, handbrake, use_item)
         self.throttle = throttle or 0

@@ -47,5 +47,4 @@ These classes can be modified as shown in example_bot.lua
 
 - Proper classes for Ball attributes
 - FieldInfo
-- BallPrediction
 - Figure out why it segfaults when there are more than 2 players on the field

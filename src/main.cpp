@@ -70,42 +70,6 @@ void run_file(lua_State *L, char* filename, int ret){
         luaL_error(L, "cannot load required file: %s", lua_tostring(L, -1));
 }
 
-struct LuaAgent {
-    PyObject_HEAD
-    lua_State *L;
-};
-
-lua_State* createAgent(int index){
-    lua_State *L = luaL_newstate();
-    luaL_openlibs(L);
-
-    // Add _G to the stack
-    lua_getglobal(L, "_G");
-
-    // Register `class` and `super`
-    run_file(L, (char*)"classes.lua", 3);
-    lua_setfield(L, 1, "dump");
-    lua_setfield(L, 1, "super");
-    lua_setfield(L, 1, "class");
-    lua_settop(L, 0);
-
-    // Register structs
-    run_file(L, (char*)"structs.lua", 0);
-    // Load bot onto the stack
-    // THIS FILE MUST RETURN AN INSTANCE OR IT WONT WORK!
-    run_file(L, (char*)"bot.lua", 1);
-    lua_pushvalue(L, -1);
-
-    // Call bot_init
-    lua_getfield(L, -1, "bot_init");
-    lua_insert(L, -2);
-    lua_pushnumber(L, index+1);
-    lua_call(L, 2, 0);
-
-    // Pop _G from the stack
-    return L;
-}
-
 void getInt(lua_State* L, PyObject* parent, char* name){
     PyObject* prop = PyObject_GetAttrString(parent, name);
     long x = PyLong_AsLong(prop);
@@ -156,6 +120,107 @@ void getRotation(lua_State* L, PyObject* parent, char* name){
     getDouble(L, vec, (char*)"roll");
     Py_DECREF(vec);
     lua_setfield(L, -2, name);
+}
+
+struct LuaAgent {
+    PyObject_HEAD
+    PyObject* bot;
+    lua_State *L;
+};
+
+static int getBallPrediction(lua_State *L){
+    // TODO: Use Ball Prediction DLL?
+
+    // Stack: [..., Bot]
+    lua_getfield(L, -1, "___agentptr");
+    // Stack: [..., Bot, <agent>]
+    auto agent = (LuaAgent*)lua_touserdata(L, -1);
+    lua_pop(L, 1);
+    // Stack: [..., Bot]
+    PyObject* ball_pred_struct = PyObject_CallMethod(agent->bot, "get_ball_prediction_struct", nullptr);
+    lua_newtable(L);
+    // Stack: [..., Bot, {table ball_prediction}]
+
+    PyObject* num_slices = PyObject_GetAttrString(ball_pred_struct, "num_slices");
+    long num_slices_i = PyLong_AsLong(num_slices);
+    lua_pushinteger(L, num_slices_i);
+    // Stack: [..., Bot, {table ball_prediction}, num_slices]
+    lua_setfield(L, -2, "num_slices");
+    // Stack: [..., Bot, {table ball_prediction}]
+
+    PyObject* slices = PyObject_GetAttrString(ball_pred_struct, "slices");
+
+    lua_newtable(L);
+    // Stack: [..., Bot, {table ball_prediction}, {table slices}]
+    for (long i = 0; i < num_slices_i; i++){
+        PyObject* index = PyLong_FromLong(i);
+        PyObject* slice = PyObject_GetItem(slices, index);
+        Py_DECREF(index);
+        lua_newtable(L);
+
+        PyObject* physics = PyObject_GetAttrString(slice, "physics");
+        // Stack: [..., Bot, {table ball_prediction}, {table slices}, {table slice}]
+        getVector(L, physics, (char*)"location");
+        getVector(L, physics, (char*)"velocity");
+        getVector(L, physics, (char*)"angular_velocity");
+        getRotation(L, physics, (char*)"rotation");
+        Py_DECREF(physics);
+
+        getDouble(L, slice, (char*)"game_seconds");
+
+        Py_DECREF(slice);
+        lua_rawseti(L, -2, i+1);
+        // Stack: [..., Bot, {table ball_prediction}, {table slices}]
+    }
+    // Stack: [..., Bot, {table ball_prediction}, {table slices}]
+    lua_setfield(L, -2, "slices");
+    // Stack: [..., Bot, {table ball_prediction}]
+
+    Py_DECREF(slices);
+    Py_DECREF(ball_pred_struct);
+
+    lua_getglobal(L, "BallPrediction");
+    lua_insert(L, -2);
+    lua_call(L, 1, 1);
+
+    return 1;
+}
+
+lua_State* createAgent(LuaAgent* agent, int index){
+    lua_State *L = luaL_newstate();
+    luaL_openlibs(L);
+
+    // Add _G to the stack
+    lua_getglobal(L, "_G");
+
+    // Register `class` and `super`
+    run_file(L, (char*)"classes.lua", 3);
+    lua_setfield(L, 1, "dump");
+    lua_setfield(L, 1, "super");
+    lua_setfield(L, 1, "class");
+    lua_settop(L, 0);
+
+    // Register structs
+    run_file(L, (char*)"structs.lua", 0);
+    // Load bot onto the stack
+    // THIS FILE MUST RETURN AN INSTANCE OR IT WONT WORK!
+    run_file(L, (char*)"bot.lua", 1);
+    lua_pushlightuserdata(L, agent);
+    lua_setfield(L, -2, "___agentptr");
+    lua_pushvalue(L, -1);
+
+    lua_pushcfunction(L, getBallPrediction);
+    lua_setfield(L, -2, "get_ball_prediction");
+    // Add methods
+
+    // Call bot_init
+    lua_getfield(L, -1, "bot_init");
+    lua_insert(L, -2);
+    lua_pushnumber(L, index+1);
+    lua_call(L, 2, 0);
+
+    // Pop _G from the stack
+    return L;
 }
 
 void createLuaPacket(lua_State *L, PyObject* packet){
@@ -476,13 +541,15 @@ static int Agent_tp_init(PyObject *_self, PyObject *args, PyObject *kwargs) {
     auto* self = (LuaAgent*)_self;
 
     int index;
-    char* kwlist[] = {(char*)"index", nullptr};
+    PyObject* bot = nullptr;
+    char* kwlist[] = {(char*)"bot", (char*)"index", nullptr};
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "i:__init__", kwlist, &index)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "Oi:__init__", kwlist, &bot, &index)) {
         return -1;
     }
 
-    self->L = createAgent(index);
+    self->bot = bot;
+    self->L = createAgent(self, index);
     return 0;
 }
 

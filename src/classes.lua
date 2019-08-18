@@ -6,6 +6,7 @@ function dump(o, r, indent, n, noprint)
 
     local s = "{\n"
     for k, v in pairs(o) do
+        local val
         if type(v) == "table" and ((r and v.__name ~= nil) or k == "__identity") then
             val = dump(v, r, indent, n+1)
         elseif type(v) == "string" then
