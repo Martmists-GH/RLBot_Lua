@@ -15,7 +15,7 @@ with open("README.md") as f:
 
 setup(
     name="rlbot_lua",
-    version="0.1.1",
+    version="0.1.2",
     description="Lua wrapper for RLBot",
     long_description=long_description,
     url="https://github.com/martmists/RLBot_Lua",

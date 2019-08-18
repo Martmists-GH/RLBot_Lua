@@ -2,6 +2,14 @@
 
 This extension creates a native bridge between Python and Lua, implementing its own class system to simplify usage.
 
+## Installation
+
+```
+$ python -m pip install rlbot_lua
+``` 
+
+> Note: Only supports 64-bit OS/Python
+
 ## Bot setup
 Copy the following files to your bot folder:
 
